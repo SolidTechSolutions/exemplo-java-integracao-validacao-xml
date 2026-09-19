@@ -49,39 +49,47 @@ public class ValidationService {
         }
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        for (File xml : xmlFiles) {
-            body.add("document", new FileSystemResource(xml));
+        for (int i = 0; i < xmlFiles.length; i++) {
+            body.add("signedFile[" + i + "]", new FileSystemResource(xmlFiles[i]));
         }
         log.info("Validating {} XML file(s) from {}", xmlFiles.length, batchInputPath);
-        return callApi(body);
+        return callApi(body, null, null);
     }
 
     /**
      * Validates XML files received via multipart form upload.
      * @param files uploaded XML files with XAdES signatures
+     * @param authorizationOverride optional per-request Bearer token (falls back to solidsign.api.authorization)
+     * @param baseUrlOverride optional per-request API base URL (falls back to solidsign.api.base-url)
      */
-    public ValidationReportsResponseDTO validateForm(List<MultipartFile> files) throws IOException {
+    public ValidationReportsResponseDTO validateForm(List<MultipartFile> files, String authorizationOverride, String baseUrlOverride) throws IOException {
+        // The real SolidSign API reads indexed multipart fields (signedFile[0], signedFile[1], ...),
+        // not a plain repeated "document" field — that field name silently produced empty uploads.
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        for (MultipartFile mf : files) {
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile mf = files.get(i);
             Path tmp = Files.createTempFile("solidsign-xml-", ".xml");
             mf.transferTo(tmp);
             tmp.toFile().deleteOnExit();
             String originalName = mf.getOriginalFilename();
-            body.add("document", new FileSystemResource(tmp.toFile()) {
+            body.add("signedFile[" + i + "]", new FileSystemResource(tmp.toFile()) {
                 @Override public String getFilename() { return originalName; }
             });
         }
         log.info("Validating {} uploaded XML file(s)", files.size());
-        return callApi(body);
+        return callApi(body, authorizationOverride, baseUrlOverride);
     }
 
-    private ValidationReportsResponseDTO callApi(MultiValueMap<String, Object> body) {
+    private ValidationReportsResponseDTO callApi(MultiValueMap<String, Object> body, String authorizationOverride, String baseUrlOverride) {
+        String auth = (authorizationOverride != null && !authorizationOverride.isBlank()) ? authorizationOverride : authorization;
+        String effectiveBaseUrl = (baseUrlOverride != null && !baseUrlOverride.isBlank()) ? baseUrlOverride : baseUrl;
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        headers.set(HttpHeaders.AUTHORIZATION, authorization);
+        headers.set(HttpHeaders.AUTHORIZATION, auth.startsWith("Bearer ") ? auth : "Bearer " + auth);
 
         HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
-        String url = baseUrl.replaceAll("/+$", "") + "/solidsign/dsig/validation/verify-xml";
+        String url = effectiveBaseUrl.replaceAll("/+$", "") + "/solidsign/dsig/validation/verify-xml";
 
         ResponseEntity<ValidationReportsResponseDTO> response =
             restTemplate.exchange(url, HttpMethod.POST, request, ValidationReportsResponseDTO.class);

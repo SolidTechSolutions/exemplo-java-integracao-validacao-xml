@@ -43,9 +43,12 @@ public class ValidationController {
      *        -F "document=@/path/to/signed.xml" \
      *        -F "document=@/path/to/other.xml"
      */
+    @CrossOrigin
     @PostMapping("/form")
     public ResponseEntity<ValidationReportsResponseDTO> validateForm(
-            @RequestPart("document") List<MultipartFile> files) throws IOException {
-        return ResponseEntity.ok(service.validateForm(files));
+            @RequestPart("document") List<MultipartFile> files,
+            @RequestPart(value = "authorization", required = false) String authorization,
+            @RequestPart(value = "baseUrl", required = false) String baseUrl) throws IOException {
+        return ResponseEntity.ok(service.validateForm(files, authorization, baseUrl));
     }
 }
